@@ -1,0 +1,158 @@
+"use client";
+
+import React, { useState, useEffect } from "react";
+import { Database, Download, HardDrive, RefreshCw, CheckCircle, AlertCircle, ShieldCheck } from "lucide-react";
+
+interface BackupFile {
+  name: string;
+  size: number;
+  createdAt: string;
+}
+
+export default function BackupPage() {
+  const [backups, setBackups] = useState<BackupFile[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [creating, setCreating] = useState(false);
+  const [statusMsg, setStatusMsg] = useState<{ text: string; isError?: boolean } | null>(null);
+
+  const loadBackups = async () => {
+    try {
+      setLoading(true);
+      const res = await fetch("/api/backup?action=list");
+      const data = await res.json();
+      if (data.success) setBackups(data.backups);
+    } catch (e) {
+      console.error(e);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    loadBackups();
+  }, []);
+
+  const handleCreateSnapshot = async () => {
+    try {
+      setCreating(true);
+      setStatusMsg(null);
+      const res = await fetch("/api/backup", { method: "POST" });
+      const data = await res.json();
+      if (!data.success) throw new Error(data.error);
+
+      setStatusMsg({ text: data.message, isError: false });
+      loadBackups();
+    } catch (err: any) {
+      setStatusMsg({ text: err.message || "فشل إنشاء النسخة الاحتياطية", isError: true });
+    } finally {
+      setCreating(false);
+    }
+  };
+
+  return (
+    <div className="space-y-6">
+      {/* Header */}
+      <div className="bg-slate-900 rounded-3xl p-6 text-white shadow-xl flex flex-col md:flex-row md:items-center justify-between gap-4">
+        <div className="flex items-center gap-3">
+          <div className="p-3 bg-cyan-500/20 border border-cyan-500/30 rounded-2xl text-cyan-400">
+            <Database className="w-6 h-6" />
+          </div>
+          <div>
+            <h1 className="text-xl font-black">النسخ الاحتياطي وحماية البيانات (Backup & Recovery)</h1>
+            <p className="text-slate-400 text-xs">
+              تأمين وأخذ نسخ احتياطية كاملة من قاعدة بيانات مستودع DESERVE لتفادي أي فقدان للبيانات
+            </p>
+          </div>
+        </div>
+
+        <div className="flex items-center gap-2">
+          <a
+            href="/api/backup?action=download"
+            download
+            className="flex items-center gap-2 px-5 py-3 bg-cyan-500 hover:bg-cyan-400 text-slate-950 font-black rounded-xl text-xs transition shadow-lg shadow-cyan-500/20"
+          >
+            <Download className="w-4 h-4" />
+            <span>تحميل نسخة قاعدة البيانات (.db)</span>
+          </a>
+        </div>
+      </div>
+
+      {statusMsg && (
+        <div
+          className={`p-4 rounded-2xl border text-xs font-bold flex items-center justify-between ${
+            statusMsg.isError ? "bg-rose-50 border-rose-200 text-rose-700" : "bg-emerald-50 border-emerald-200 text-emerald-800"
+          }`}
+        >
+          <span>{statusMsg.text}</span>
+          <button onClick={() => setStatusMsg(null)} className="text-slate-400 hover:text-slate-600 font-bold">
+            ✕
+          </button>
+        </div>
+      )}
+
+      {/* Snapshot Action & Security Note */}
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+        <div className="md:col-span-2 bg-white rounded-2xl p-6 border border-slate-200 shadow-sm space-y-4">
+          <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+            <div>
+              <h3 className="font-bold text-sm text-slate-900">سجل النسخ الاحتياطية المحفوظة محلياً (Local Snapshots)</h3>
+              <p className="text-xs text-slate-400">تُحفظ النسخ داخل مجلد backups بالمشروع</p>
+            </div>
+            <button
+              onClick={handleCreateSnapshot}
+              disabled={creating}
+              className="px-4 py-2 bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs rounded-xl transition flex items-center gap-1.5 shadow-sm disabled:opacity-50"
+            >
+              <HardDrive className="w-3.5 h-3.5 text-cyan-400" />
+              <span>{creating ? "جاري الحفظ..." : "أخذ لقطة سريعة الآن"}</span>
+            </button>
+          </div>
+
+          <div className="max-h-72 overflow-y-auto divide-y divide-slate-100">
+            {loading ? (
+              <div className="p-8 text-center text-xs text-slate-400">جاري قراءة النسخ...</div>
+            ) : backups.length === 0 ? (
+              <div className="p-8 text-center text-xs text-slate-400">
+                لا توجد لقطات محلية مسجلة بعد. اضغط "أخذ لقطة سريعة الآن" لإنشاء أول لقطة.
+              </div>
+            ) : (
+              backups.map((b) => (
+                <div key={b.name} className="py-3 px-2 flex items-center justify-between text-xs hover:bg-slate-50">
+                  <div className="flex items-center gap-3">
+                    <Database className="w-4 h-4 text-cyan-600" />
+                    <div>
+                      <div className="font-mono font-bold text-slate-900">{b.name}</div>
+                      <div className="text-[11px] text-slate-400">{b.createdAt}</div>
+                    </div>
+                  </div>
+                  <span className="font-mono text-slate-500 font-bold">{(b.size / 1024).toFixed(1)} KB</span>
+                </div>
+              ))
+            )}
+          </div>
+        </div>
+
+        {/* Cloud Sync Guidance */}
+        <div className="bg-gradient-to-br from-slate-900 to-slate-800 rounded-2xl p-6 text-white border border-slate-700 shadow-sm space-y-4 flex flex-col justify-between">
+          <div className="space-y-3">
+            <div className="flex items-center gap-2 text-cyan-400 font-bold text-xs">
+              <ShieldCheck className="w-5 h-5" />
+              <span>حماية البيانات السحابية (Cloud Sync)</span>
+            </div>
+            <p className="text-xs text-slate-300 leading-relaxed">
+              لضمان عدم ضياع أي بيانات إذا تعطل هذا الجهاز، يمكنك:
+            </p>
+            <ul className="text-xs text-slate-300 space-y-2 list-disc list-inside">
+              <li>تحميل ملف <strong className="text-cyan-300">.db</strong> وحفظه أسبوعياً على Google Drive.</li>
+              <li>أو مزامنة مجلد المشروع تلقائياً مع Dropbox أو Google Drive Desktop.</li>
+            </ul>
+          </div>
+
+          <div className="p-3 bg-white/10 rounded-xl text-[11px] text-slate-300 border border-white/10">
+            قاعدة البيانات تعتمد محرك SQLite مع تشغيل تقنية WAL لكتابة سريعة ومحمية من انقطاع الكهرباء.
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
