@@ -7,6 +7,8 @@ export const metadata: Metadata = {
   description: "Official Warehouse Inventory & Operations System for DESERVE",
 };
 
+export const dynamic = "force-dynamic";
+
 export default function RootLayout({
   children,
 }: {
