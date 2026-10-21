@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useState, useEffect } from "react";
-import { Database, Download, HardDrive, RefreshCw, CheckCircle, AlertCircle, ShieldCheck } from "lucide-react";
+import { Database, Download, HardDrive, RefreshCw, CheckCircle, AlertCircle, ShieldCheck, RotateCcw } from "lucide-react";
 
 interface BackupFile {
   name: string;
@@ -49,6 +49,29 @@ export default function BackupPage() {
     }
   };
 
+  const [resetting, setResetting] = useState(false);
+
+  const handleResetData = async () => {
+    const confirmed = window.confirm(
+      "⚠️ تنبيه هام:\nهل أنت متأكد تماماً من رغبتك في تصفير جميع الأرصدة ومسح الحركات التجريبية؟\n\n- سيتم الحفاظ على كتالوج الأصناف الـ 118 كاملاً.\n- ستصبح جميع الكميات 0 قطعة استعداداً لإدخال الجرد الفعلي المظبوط."
+    );
+    if (!confirmed) return;
+
+    try {
+      setResetting(true);
+      setStatusMsg(null);
+      const res = await fetch("/api/backup?action=reset", { method: "POST" });
+      const data = await res.json();
+      if (!data.success) throw new Error(data.error);
+
+      setStatusMsg({ text: data.message, isError: false });
+    } catch (err: any) {
+      setStatusMsg({ text: err.message || "فشل تصفير البيانات", isError: true });
+    } finally {
+      setResetting(false);
+    }
+  };
+
   return (
     <div className="space-y-6">
       {/* Header */}
@@ -65,7 +88,17 @@ export default function BackupPage() {
           </div>
         </div>
 
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 flex-wrap">
+          <button
+            onClick={handleResetData}
+            disabled={resetting}
+            className="flex items-center gap-2 px-4 py-3 bg-rose-600/90 hover:bg-rose-500 text-white font-bold rounded-xl text-xs transition shadow-lg shadow-rose-600/20 disabled:opacity-50"
+            title="تصفير الأرصدة ومسح الحركات التجريبية"
+          >
+            <RotateCcw className="w-4 h-4" />
+            <span>{resetting ? "جاري التصفير..." : "تصفير الأرصدة وبدء الجرد من الصفر"}</span>
+          </button>
+
           <a
             href="/api/backup?action=download"
             download

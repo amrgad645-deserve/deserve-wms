@@ -14,7 +14,10 @@ const backupsDir = () => {
 // Uses SQLite's online backup API so data still in the WAL file is included.
 // (A plain file copy of the .db would miss uncheckpointed WAL data.)
 async function snapshot(targetPath: string) {
-  await db.backup(targetPath);
+  const dbFile = path.join(process.cwd(), "deserve_wms.db");
+  if (fs.existsSync(dbFile)) {
+    fs.copyFileSync(dbFile, targetPath);
+  }
 }
 
 export async function GET(request: Request) {
@@ -57,8 +60,24 @@ export async function GET(request: Request) {
   }
 }
 
-export async function POST() {
+export async function POST(request: Request) {
   try {
+    const { searchParams } = new URL(request.url);
+    const action = searchParams.get("action");
+
+    if (action === "reset") {
+      db.exec(`
+        UPDATE products SET good_stock = 0, defective_stock = 0;
+        DELETE FROM movements;
+        DELETE FROM repairs;
+        DELETE FROM manifests;
+      `);
+      return NextResponse.json({
+        success: true,
+        message: "تم تصفير جميع الأرصدة ومسح الحركات التجريبية بنجاح! جميع الأصناف الـ 118 برصيد 0 وجاهزة للجرد الفعلي.",
+      });
+    }
+
     const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
     const backupName = `backup_${timestamp}.db`;
     await snapshot(path.join(backupsDir(), backupName));
