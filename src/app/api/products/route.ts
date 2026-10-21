@@ -111,75 +111,80 @@ export async function POST(request: Request) {
       const operator = String(body.operator || "").trim() || "مشرف المخزن";
       const createdSkus: string[] = [];
 
-      const tx = db.transaction(() => {
-        for (const item of items) {
-          const sku = String(item.sku || "").trim().toUpperCase();
-          const model = String(item.model || "").trim().toUpperCase();
-          const color = String(item.color || "").trim().toUpperCase();
-          const size = String(item.size || "").trim().toUpperCase();
-          const binLocation = String(item.binLocation || item.bin_location || "UNASSIGNED").trim().toUpperCase();
-          const goodStock = Math.max(0, Number(item.goodStock ?? item.good_stock ?? 0));
-          const defectiveStock = Math.max(0, Number(item.defectiveStock ?? item.defective_stock ?? 0));
+      for (const item of items) {
+        const sku = String(item.sku || "").trim().toUpperCase();
+        const model = String(item.model || "").trim().toUpperCase();
+        const color = String(item.color || "").trim().toUpperCase();
+        const size = String(item.size || "").trim().toUpperCase();
+        const binLocation = String(item.binLocation || item.bin_location || "UNASSIGNED").trim().toUpperCase();
+        const goodStock = Math.max(0, Number(item.goodStock ?? item.good_stock ?? 0));
+        const defectiveStock = Math.max(0, Number(item.defectiveStock ?? item.defective_stock ?? 0));
 
-          if (!sku || !model || !color || !size) {
-            throw new Error("يرجى ملء جميع الحقول الإلزامية: الموديل، اللون، المقاس، وكود الصنف (SKU)");
-          }
-
-          // Check duplicate SKU
-          const existing = db.prepare("SELECT sku FROM products WHERE sku = ?").get(sku) as any;
-          if (existing) {
-            throw new Error(`كود الصنف (${sku}) موجود مسبقاً في النظام!`);
-          }
-
-          // Auto-generate or validate barcode
-          let barcode = String(item.barcode || "").trim();
-          if (!barcode) {
-            barcode = `890${sku.replace(/[^A-Za-z0-9]/g, "")}`;
-          }
-
-          // Check duplicate Barcode
-          const existingBc = db.prepare("SELECT sku FROM products WHERE barcode = ?").get(barcode) as any;
-          if (existingBc) {
-            throw new Error(`الباركود (${barcode}) مسجل بالفعل لصنف آخر (${existingBc.sku})!`);
-          }
-
-          // Insert product
-          db.prepare(`
-            INSERT INTO products (sku, model, color, size, barcode, good_stock, defective_stock, bin_location)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-          `).run(sku, model, color, size, barcode, goodStock, defectiveStock, binLocation);
-
-          createdSkus.push(sku);
-
-          // If opening stock > 0, record initial movement
-          if (goodStock > 0 || defectiveStock > 0) {
-            const now = new Date();
-            const dateStr = now.toISOString().split("T")[0];
-            const timeStr = now.toTimeString().split(" ")[0];
-
-            const countRes = db.prepare("SELECT COUNT(*) as count FROM movements").get() as any;
-            const movId = "MOV-" + ("0000" + (countRes.count + 1)).slice(-4);
-
-            db.prepare(`
-              INSERT INTO movements (mov_id, date, time, ref_order, sku, model, color, size, qty, type, operator, notes)
-              VALUES (?, ?, ?, 'OPENING_STOCK', ?, ?, ?, ?, ?, 'INITIAL_STOCK', ?, ?)
-            `).run(
-              movId,
-              dateStr,
-              timeStr,
-              sku,
-              model,
-              color,
-              size,
-              goodStock + defectiveStock,
-              operator,
-              `رصيد افتتاحي عند إضافة الصنف: سليم (${goodStock})، تالف (${defectiveStock})`
-            );
-          }
+        if (!sku || !model || !color || !size) {
+          return NextResponse.json({
+            success: false,
+            error: "يرجى ملء جميع الحقول الإلزامية: الموديل، اللون، المقاس، وكود الصنف (SKU)",
+          }, { status: 400 });
         }
-      });
 
-      tx();
+        // Check duplicate SKU
+        const existing = db.prepare("SELECT sku FROM products WHERE sku = ?").get(sku) as any;
+        if (existing) {
+          return NextResponse.json({
+            success: false,
+            error: `كود الصنف (${sku}) موجود مسبقاً في النظام!`,
+          }, { status: 400 });
+        }
+
+        // Auto-generate or validate barcode
+        let barcode = String(item.barcode || "").trim();
+        if (!barcode) {
+          barcode = `890${sku.replace(/[^A-Za-z0-9]/g, "")}`;
+        }
+
+        // Check duplicate Barcode
+        const existingBc = db.prepare("SELECT sku FROM products WHERE barcode = ?").get(barcode) as any;
+        if (existingBc) {
+          return NextResponse.json({
+            success: false,
+            error: `الباركود (${barcode}) مسجل بالفعل لصنف آخر (${existingBc.sku})!`,
+          }, { status: 400 });
+        }
+
+        // Insert product
+        db.prepare(`
+          INSERT INTO products (sku, model, color, size, barcode, good_stock, defective_stock, bin_location)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        `).run(sku, model, color, size, barcode, goodStock, defectiveStock, binLocation);
+
+        createdSkus.push(sku);
+
+        // If opening stock > 0, record initial movement
+        if (goodStock > 0 || defectiveStock > 0) {
+          const now = new Date();
+          const dateStr = now.toISOString().split("T")[0];
+          const timeStr = now.toTimeString().split(" ")[0];
+
+          const countRes = db.prepare("SELECT COUNT(*) as count FROM movements").get() as any;
+          const movId = "MOV-" + ("0000" + (countRes.count + 1)).slice(-4);
+
+          db.prepare(`
+            INSERT INTO movements (mov_id, date, time, ref_order, sku, model, color, size, qty, type, operator, notes)
+            VALUES (?, ?, ?, 'OPENING_STOCK', ?, ?, ?, ?, ?, 'INITIAL_STOCK', ?, ?)
+          `).run(
+            movId,
+            dateStr,
+            timeStr,
+            sku,
+            model,
+            color,
+            size,
+            goodStock + defectiveStock,
+            operator,
+            `رصيد افتتاحي عند إضافة الصنف: سليم (${goodStock})، تالف (${defectiveStock})`
+          );
+        }
+      }
 
       return NextResponse.json({
         success: true,
@@ -209,11 +214,9 @@ export async function POST(request: Request) {
         }, { status: 400 });
       }
 
-      db.transaction(() => {
-        db.prepare("DELETE FROM movements WHERE sku = ?").run(sku);
-        db.prepare("DELETE FROM repairs WHERE sku = ?").run(sku);
-        db.prepare("DELETE FROM products WHERE sku = ?").run(sku);
-      })();
+      db.prepare("DELETE FROM movements WHERE sku = ?").run(sku);
+      db.prepare("DELETE FROM repairs WHERE sku = ?").run(sku);
+      db.prepare("DELETE FROM products WHERE sku = ?").run(sku);
 
       return NextResponse.json({
         success: true,

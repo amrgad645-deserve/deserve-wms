@@ -191,14 +191,20 @@ const db = {
   },
   transaction(fn: Function) {
     return (...args: any[]) => {
-      sqlDb.exec("BEGIN TRANSACTION;");
+      try {
+        sqlDb.exec("BEGIN TRANSACTION;");
+      } catch (e) {}
       try {
         const res = fn(...args);
-        sqlDb.exec("COMMIT;");
+        try {
+          sqlDb.exec("COMMIT;");
+        } catch (e) {}
         saveDb();
         return res;
       } catch (e) {
-        sqlDb.exec("ROLLBACK;");
+        try {
+          sqlDb.exec("ROLLBACK;");
+        } catch (rbErr) {}
         throw e;
       }
     };
