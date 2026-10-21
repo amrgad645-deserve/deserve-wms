@@ -12,15 +12,11 @@ const nextConfig = {
   typescript: {
     ignoreBuildErrors: true,
   },
-  serverExternalPackages: ['better-sqlite3'],
   experimental: {
     serverComponentsExternalPackages: ['better-sqlite3'],
   },
-  webpack: (config, { isServer }) => {
+  webpack: (config) => {
     config.resolve.alias['@'] = path.resolve(__dirname, 'src');
-    if (isServer) {
-      config.externals.push('better-sqlite3');
-    }
     return config;
   },
 };
