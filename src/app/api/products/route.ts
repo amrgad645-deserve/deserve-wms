@@ -99,6 +99,129 @@ export async function GET(request: Request) {
 export async function POST(request: Request) {
   try {
     const body = await request.json();
+    const { action } = body;
+
+    // 1. CREATE NEW PRODUCT(S)
+    if (action === "create") {
+      const items = Array.isArray(body.products) ? body.products : [body];
+      if (!items || items.length === 0) {
+        return NextResponse.json({ success: false, error: "بيانات الصنف مطلوبة" }, { status: 400 });
+      }
+
+      const operator = String(body.operator || "").trim() || "مشرف المخزن";
+      const createdSkus: string[] = [];
+
+      const tx = db.transaction(() => {
+        for (const item of items) {
+          const sku = String(item.sku || "").trim().toUpperCase();
+          const model = String(item.model || "").trim().toUpperCase();
+          const color = String(item.color || "").trim().toUpperCase();
+          const size = String(item.size || "").trim().toUpperCase();
+          const binLocation = String(item.binLocation || item.bin_location || "UNASSIGNED").trim().toUpperCase();
+          const goodStock = Math.max(0, Number(item.goodStock ?? item.good_stock ?? 0));
+          const defectiveStock = Math.max(0, Number(item.defectiveStock ?? item.defective_stock ?? 0));
+
+          if (!sku || !model || !color || !size) {
+            throw new Error("يرجى ملء جميع الحقول الإلزامية: الموديل، اللون، المقاس، وكود الصنف (SKU)");
+          }
+
+          // Check duplicate SKU
+          const existing = db.prepare("SELECT sku FROM products WHERE sku = ?").get(sku) as any;
+          if (existing) {
+            throw new Error(`كود الصنف (${sku}) موجود مسبقاً في النظام!`);
+          }
+
+          // Auto-generate or validate barcode
+          let barcode = String(item.barcode || "").trim();
+          if (!barcode) {
+            barcode = `890${sku.replace(/[^A-Za-z0-9]/g, "")}`;
+          }
+
+          // Check duplicate Barcode
+          const existingBc = db.prepare("SELECT sku FROM products WHERE barcode = ?").get(barcode) as any;
+          if (existingBc) {
+            throw new Error(`الباركود (${barcode}) مسجل بالفعل لصنف آخر (${existingBc.sku})!`);
+          }
+
+          // Insert product
+          db.prepare(`
+            INSERT INTO products (sku, model, color, size, barcode, good_stock, defective_stock, bin_location)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+          `).run(sku, model, color, size, barcode, goodStock, defectiveStock, binLocation);
+
+          createdSkus.push(sku);
+
+          // If opening stock > 0, record initial movement
+          if (goodStock > 0 || defectiveStock > 0) {
+            const now = new Date();
+            const dateStr = now.toISOString().split("T")[0];
+            const timeStr = now.toTimeString().split(" ")[0];
+
+            const countRes = db.prepare("SELECT COUNT(*) as count FROM movements").get() as any;
+            const movId = "MOV-" + ("0000" + (countRes.count + 1)).slice(-4);
+
+            db.prepare(`
+              INSERT INTO movements (mov_id, date, time, ref_order, sku, model, color, size, qty, type, operator, notes)
+              VALUES (?, ?, ?, 'OPENING_STOCK', ?, ?, ?, ?, ?, 'INITIAL_STOCK', ?, ?)
+            `).run(
+              movId,
+              dateStr,
+              timeStr,
+              sku,
+              model,
+              color,
+              size,
+              goodStock + defectiveStock,
+              operator,
+              `رصيد افتتاحي عند إضافة الصنف: سليم (${goodStock})، تالف (${defectiveStock})`
+            );
+          }
+        }
+      });
+
+      tx();
+
+      return NextResponse.json({
+        success: true,
+        message: createdSkus.length === 1 
+          ? `تم إضافة الصنف (${createdSkus[0]}) بنجاح إلى الكتالوج`
+          : `تم إضافة عدد (${createdSkus.length}) أصناف بنجاح إلى الكتالوج`,
+        createdSkus,
+      });
+    }
+
+    // 2. DELETE PRODUCT
+    if (action === "delete") {
+      const { sku } = body;
+      if (!sku) {
+        return NextResponse.json({ success: false, error: "كود الصنف مطلوب للحذف" }, { status: 400 });
+      }
+
+      const product = db.prepare("SELECT * FROM products WHERE sku = ?").get(sku) as any;
+      if (!product) {
+        return NextResponse.json({ success: false, error: "الصنف غير موجود" }, { status: 404 });
+      }
+
+      if (product.good_stock > 0 || product.defective_stock > 0) {
+        return NextResponse.json({
+          success: false,
+          error: `لا يمكن حذف الصنف (${sku}) لوجود رصيد حالي بالمخزن (${product.good_stock + product.defective_stock} قطعة). يرجى تصفير الرصيد أولاً قبل الحذف.`,
+        }, { status: 400 });
+      }
+
+      db.transaction(() => {
+        db.prepare("DELETE FROM movements WHERE sku = ?").run(sku);
+        db.prepare("DELETE FROM repairs WHERE sku = ?").run(sku);
+        db.prepare("DELETE FROM products WHERE sku = ?").run(sku);
+      })();
+
+      return NextResponse.json({
+        success: true,
+        message: `تم حذف الصنف (${sku}) من الكتالوج بنجاح`,
+      });
+    }
+
+    // 3. STOCK ADJUSTMENT (Default fallback)
     const { sku, goodStock, defectiveStock, operator, reason } = body;
 
     if (!sku) {

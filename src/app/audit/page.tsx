@@ -332,14 +332,12 @@ export default function AuditPage() {
             className="border border-slate-300 rounded-xl px-3 py-2 text-xs font-semibold text-slate-700 bg-white focus:outline-none"
           >
             <option value="">جميع الموديلات والأطقم</option>
-            <option value="ALL_SETS" className="font-bold text-purple-700">📦 جميع الأطقم الكاملة (17 طقم)</option>
-            <option value="ELITE">موديل ELITE (شنط فردية)</option>
-            <option value="ELITE SET">موديل ELITE SET (أطقم 3 قطع)</option>
-            <option value="FLOW">موديل FLOW (شنط فردية)</option>
-            <option value="FLOW SET">موديل FLOW SET (أطقم 3 قطع)</option>
-            <option value="TITAN">موديل TITAN (شنط فردية)</option>
-            <option value="TITAN SET">موديل TITAN SET (أطقم 3 قطع)</option>
-            <option value="LUGGAGE COVER">كفرات الشنط والحماية</option>
+            <option value="ALL_SETS" className="font-bold text-purple-700">📦 جميع الأطقم الكاملة</option>
+            {Array.from(new Set(products.map((p) => p.model))).map((m) => (
+              <option key={m} value={m}>
+                {m.includes("SET") ? `موديل ${m} (أطقم 3 قطع)` : `موديل ${m}`}
+              </option>
+            ))}
           </select>
         </div>
 
