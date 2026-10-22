@@ -11,21 +11,45 @@ const SQL = await initSqlJs({
 });
 
 let sqlDb: any;
+let inTransaction = false;
+let lastDbMtime = 0;
+
 if (fs.existsSync(dbPath)) {
   const buffer = fs.readFileSync(dbPath);
   sqlDb = new SQL.Database(buffer);
+  try {
+    lastDbMtime = fs.statSync(dbPath).mtimeMs;
+  } catch (e) {}
 } else {
   sqlDb = new SQL.Database();
 }
 
+function syncFromDiskIfNeeded() {
+  if (inTransaction) return;
+  if (!fs.existsSync(dbPath)) return;
+  try {
+    const stat = fs.statSync(dbPath);
+    if (stat.mtimeMs > lastDbMtime) {
+      const buffer = fs.readFileSync(dbPath);
+      sqlDb = new SQL.Database(buffer);
+      lastDbMtime = stat.mtimeMs;
+    }
+  } catch (e) {}
+}
+
 function saveDb() {
+  if (inTransaction) return;
   try {
     const data = sqlDb.export();
     fs.writeFileSync(dbPath, Buffer.from(data));
+    try {
+      lastDbMtime = fs.statSync(dbPath).mtimeMs;
+    } catch (e) {}
   } catch (err) {
     console.error("Failed to save database to disk:", err);
   }
 }
+
 
 // Ensure schema
 sqlDb.exec(`
@@ -145,6 +169,7 @@ if (count === 0) {
 
 const db = {
   prepare(sql: string) {
+    syncFromDiskIfNeeded();
     return {
       all(...params: any[]) {
         const flatParams = params.length === 1 && Array.isArray(params[0]) ? params[0] : params;
@@ -180,17 +205,24 @@ const db = {
         }
         stmt.step();
         stmt.free();
-        saveDb();
+        if (!inTransaction) {
+          saveDb();
+        }
         return { changes: 1 };
       },
     };
   },
   exec(sql: string) {
+    syncFromDiskIfNeeded();
     sqlDb.exec(sql);
-    saveDb();
+    if (!inTransaction) {
+      saveDb();
+    }
   },
   transaction(fn: Function) {
     return (...args: any[]) => {
+      syncFromDiskIfNeeded();
+      inTransaction = true;
       try {
         sqlDb.exec("BEGIN TRANSACTION;");
       } catch (e) {}
@@ -198,13 +230,17 @@ const db = {
         const res = fn(...args);
         try {
           sqlDb.exec("COMMIT;");
-        } catch (e) {}
+        } catch (e) {
+          console.error("Failed to commit SQLite transaction:", e);
+        }
+        inTransaction = false;
         saveDb();
         return res;
       } catch (e) {
         try {
           sqlDb.exec("ROLLBACK;");
         } catch (rbErr) {}
+        inTransaction = false;
         throw e;
       }
     };
@@ -221,8 +257,12 @@ export function reloadDb() {
   if (fs.existsSync(dbPath)) {
     const buffer = fs.readFileSync(dbPath);
     sqlDb = new SQL.Database(buffer);
+    try {
+      lastDbMtime = fs.statSync(dbPath).mtimeMs;
+    } catch (e) {}
   }
 }
 
 export default db;
+
 

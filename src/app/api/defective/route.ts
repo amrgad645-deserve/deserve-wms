@@ -16,22 +16,31 @@ export async function POST(request: Request) {
       return NextResponse.json({ success: false, error: "الكمية المعيبة يجب أن تكون 1 أو أكثر" }, { status: 400 });
     }
 
+    const cleanSku = String(sku).trim();
+
     const executeDefect = db.transaction(() => {
       const now = new Date();
       const dateStr = now.toISOString().split("T")[0];
       const timeStr = now.toTimeString().split(" ")[0];
 
-      const product = db.prepare("SELECT * FROM products WHERE sku = ?").get(sku) as any;
+      const product = db.prepare("SELECT * FROM products WHERE sku = ?").get(cleanSku) as any;
       if (!product) {
-        throw new Error(`الصنف ${sku} غير موجود`);
+        throw new Error(`الصنف ${cleanSku} غير موجود`);
       }
 
       if (product.good_stock < numQty) {
         throw new Error(`لا يمكن عزل ${numQty} قطعة لأن الرصيد السليم المتاح هو ${product.good_stock} فقط!`);
       }
 
+      const newGood = Math.max(0, product.good_stock - numQty);
+      const newDef = Number(product.defective_stock || 0) + numQty;
+
       // Move from good to defective
-      db.prepare("UPDATE products SET good_stock = good_stock - ?, defective_stock = defective_stock + ?, updated_at = CURRENT_TIMESTAMP WHERE sku = ?").run(numQty, numQty, sku);
+      db.prepare(`
+        UPDATE products 
+        SET good_stock = ?, defective_stock = ?, updated_at = CURRENT_TIMESTAMP 
+        WHERE sku = ?
+      `).run(newGood, newDef, product.sku);
 
       const countRes = db.prepare("SELECT COUNT(*) as count FROM movements").get() as any;
       const movId = "MOV-" + ("0000" + (countRes.count + 1)).slice(-4);
@@ -43,7 +52,8 @@ export async function POST(request: Request) {
         movId,
         dateStr,
         timeStr,
-        sku,
+        product.sku,
+
         product.model,
         product.color,
         product.size,
