@@ -69,6 +69,13 @@ export default function Dashboard() {
             <span>تحديث لحظي</span>
           </button>
           <Link
+            href="/defective"
+            className="flex items-center gap-2 px-3.5 py-2 rounded-xl bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-500/40 font-bold text-sm shadow-sm transition"
+          >
+            <AlertTriangle className="w-4 h-4 text-amber-400" />
+            <span>عزل تالف</span>
+          </Link>
+          <Link
             href="/audit"
             className="flex items-center gap-2 px-4 py-2 rounded-xl bg-amber-500 hover:bg-amber-600 text-slate-950 font-bold text-sm shadow-md transition"
           >
@@ -106,10 +113,13 @@ export default function Dashboard() {
         </div>
 
         {/* Defective Stock */}
-        <div className="bg-white rounded-2xl p-5 border border-slate-200/80 shadow-sm flex flex-col justify-between">
+        <Link
+          href="/defective"
+          className="bg-white rounded-2xl p-5 border border-slate-200/80 shadow-sm flex flex-col justify-between hover:border-amber-400 hover:shadow-md transition group"
+        >
           <div className="flex items-center justify-between text-slate-500 mb-2">
-            <span className="text-xs font-bold uppercase tracking-wider">مخزون التالف والمحجوز</span>
-            <div className="w-8 h-8 rounded-lg bg-amber-50 text-amber-600 flex items-center justify-center">
+            <span className="text-xs font-bold uppercase tracking-wider group-hover:text-amber-800 transition">مخزون التالف والمحجوز</span>
+            <div className="w-8 h-8 rounded-lg bg-amber-50 text-amber-600 flex items-center justify-center group-hover:bg-amber-500 group-hover:text-slate-950 transition">
               <AlertTriangle className="w-5 h-5" />
             </div>
           </div>
@@ -117,11 +127,12 @@ export default function Dashboard() {
             <div className="text-3xl font-black text-amber-600">
               {stats?.totalDefective ?? 0} <span className="text-sm font-bold text-slate-400">قطعة</span>
             </div>
-            <div className="text-xs text-amber-700 font-semibold mt-1">
-              في الحجر / معيب تحضير أو مرتجع
+            <div className="text-xs text-amber-700 font-semibold mt-1 flex items-center justify-between">
+              <span>في الحجر / معيب تحضير</span>
+              <span className="text-[10px] text-amber-600 font-bold group-hover:underline">فتح العزل ⬅️</span>
             </div>
           </div>
-        </div>
+        </Link>
 
         {/* Total Physical Units */}
         <div className="bg-white rounded-2xl p-5 border border-slate-200/80 shadow-sm flex flex-col justify-between">
