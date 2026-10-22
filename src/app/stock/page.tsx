@@ -19,11 +19,14 @@ import {
   Plus,
   Trash2,
   Sparkles,
+  FileSpreadsheet,
 } from "lucide-react";
 import Link from "next/link";
 import * as XLSX from "xlsx";
 import { Product } from "@/lib/types";
 import OperatorSelect from "@/components/OperatorSelect";
+import ExcelImportModal from "@/components/ExcelImportModal";
+
 
 export default function StockPage() {
   const [products, setProducts] = useState<Product[]>([]);
@@ -35,6 +38,8 @@ export default function StockPage() {
   const [editingBinSku, setEditingBinSku] = useState<string | null>(null);
   const [binInput, setBinInput] = useState("");
   const [statusMsg, setStatusMsg] = useState<string | null>(null);
+  const [isExcelOpen, setIsExcelOpen] = useState(false);
+
 
   // Manual Stock Adjustment Modal State
   const [adjustProduct, setAdjustProduct] = useState<Product | null>(null);
@@ -398,14 +403,24 @@ export default function StockPage() {
           </button>
 
           <button
+            onClick={() => setIsExcelOpen(true)}
+            className="flex items-center gap-2 px-4 py-2.5 bg-emerald-500 hover:bg-emerald-400 text-slate-950 text-xs font-black rounded-xl transition shadow-lg shadow-emerald-500/25 border border-emerald-400"
+            title="استيراد وتحديث الأرصدة مباشرة من ملف إكسيل"
+          >
+            <FileSpreadsheet className="w-4 h-4" />
+            <span>استيراد من إكسيل</span>
+          </button>
+
+          <button
             onClick={exportToExcel}
-            className="flex items-center gap-2 px-4 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold rounded-xl transition shadow-lg shadow-emerald-600/20"
+            className="flex items-center gap-2 px-4 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-bold rounded-xl transition"
           >
             <Download className="w-4 h-4" />
             <span>تصدير إكسيل</span>
           </button>
         </div>
       </div>
+
 
       {statusMsg && (
         <div className="p-3 rounded-xl bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs font-bold flex items-center gap-2">
@@ -1166,6 +1181,18 @@ export default function StockPage() {
           </div>
         </div>
       )}
+
+      {/* Excel Import Modal */}
+      <ExcelImportModal
+        isOpen={isExcelOpen}
+        onClose={() => setIsExcelOpen(false)}
+        onImportSuccess={(res) => {
+          setStatusMsg(
+            `تم استيراد الجرد بنجاح! تم تحديث ${res.totalUpdated} صنف (إجمالي السليم: ${res.totalGood}، إجمالي التالف: ${res.totalDef})`
+          );
+          fetchProducts();
+        }}
+      />
     </div>
   );
 }

@@ -1,7 +1,7 @@
 "use client";
 
-import React, { useState, useEffect } from "react";
-import { Database, Download, HardDrive, RefreshCw, CheckCircle, AlertCircle, ShieldCheck, RotateCcw } from "lucide-react";
+import React, { useState, useEffect, useRef } from "react";
+import { Database, Download, HardDrive, RefreshCw, CheckCircle, AlertCircle, ShieldCheck, RotateCcw, UploadCloud } from "lucide-react";
 
 interface BackupFile {
   name: string;
@@ -13,7 +13,11 @@ export default function BackupPage() {
   const [backups, setBackups] = useState<BackupFile[]>([]);
   const [loading, setLoading] = useState(true);
   const [creating, setCreating] = useState(false);
+  const [restoring, setRestoring] = useState(false);
   const [statusMsg, setStatusMsg] = useState<{ text: string; isError?: boolean } | null>(null);
+
+  const restoreInputRef = useRef<HTMLInputElement>(null);
+
 
   const loadBackups = async () => {
     try {
@@ -72,6 +76,42 @@ export default function BackupPage() {
     }
   };
 
+  const handleRestoreDb = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const confirmed = window.confirm(
+      `⚠️ تأكيد استعادة قاعدة البيانات:\nهل أنت متأكد من رغبتك في استعادة قاعدة البيانات من الملف (${file.name})؟\n\n- سيتم استبدال البيانات الحالية بالكامل بالنسخة المستعادة.\n- سيتم حفظ نسخة أمان تلقائية للبيانات الحالية قبل الاستبدال.`
+    );
+    if (!confirmed) {
+      if (restoreInputRef.current) restoreInputRef.current.value = "";
+      return;
+    }
+
+    try {
+      setRestoring(true);
+      setStatusMsg(null);
+      const formData = new FormData();
+      formData.append("file", file);
+
+      const res = await fetch("/api/backup?action=restore", {
+        method: "POST",
+        body: formData,
+      });
+
+      const data = await res.json();
+      if (!data.success) throw new Error(data.error);
+
+      setStatusMsg({ text: data.message, isError: false });
+      loadBackups();
+    } catch (err: any) {
+      setStatusMsg({ text: err.message || "فشل استعادة قاعدة البيانات", isError: true });
+    } finally {
+      setRestoring(false);
+      if (restoreInputRef.current) restoreInputRef.current.value = "";
+    }
+  };
+
   return (
     <div className="space-y-6">
       {/* Header */}
@@ -89,6 +129,23 @@ export default function BackupPage() {
         </div>
 
         <div className="flex items-center gap-2 flex-wrap">
+          <button
+            onClick={() => restoreInputRef.current?.click()}
+            disabled={restoring}
+            className="flex items-center gap-2 px-4 py-3 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded-xl text-xs transition shadow-lg shadow-emerald-600/20 disabled:opacity-50"
+            title="استعادة قاعدة البيانات من ملف .db محفوظ مسبقاً"
+          >
+            <UploadCloud className="w-4 h-4" />
+            <span>{restoring ? "جاري الاستعادة..." : "استعادة نسخة سابقة (.db)"}</span>
+          </button>
+          <input
+            ref={restoreInputRef}
+            type="file"
+            accept=".db"
+            onChange={handleRestoreDb}
+            className="hidden"
+          />
+
           <button
             onClick={handleResetData}
             disabled={resetting}
@@ -109,6 +166,7 @@ export default function BackupPage() {
           </a>
         </div>
       </div>
+
 
       {statusMsg && (
         <div

@@ -78,6 +78,36 @@ export async function POST(request: Request) {
       });
     }
 
+    if (action === "restore") {
+      const formData = await request.formData();
+      const file = formData.get("file") as File;
+      if (!file) {
+        return NextResponse.json({ success: false, error: "لم يتم تحديد ملف قاعدة بيانات (.db)" }, { status: 400 });
+      }
+
+      const buffer = Buffer.from(await file.arrayBuffer());
+      const dbFile = path.join(process.cwd(), "deserve_wms.db");
+
+      // Save a safety snapshot of current db before overwriting
+      const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
+      const safetyBackup = path.join(backupsDir(), `pre_restore_${timestamp}.db`);
+      if (fs.existsSync(dbFile)) {
+        fs.copyFileSync(dbFile, safetyBackup);
+      }
+
+      // Overwrite database file
+      fs.writeFileSync(dbFile, buffer);
+
+      // Reload in-memory SQLite database
+      db.reload();
+
+      return NextResponse.json({
+        success: true,
+        message: `تمت استعادة قاعدة البيانات بنجاح من الملف (${file.name})! تم تحديث جميع الجداول والأرصدة فوراً.`,
+      });
+    }
+
+
     const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
     const backupName = `backup_${timestamp}.db`;
     await snapshot(path.join(backupsDir(), backupName));

@@ -209,6 +209,20 @@ const db = {
       }
     };
   },
+  reload() {
+    reloadDb();
+  },
+  exportData() {
+    return sqlDb.export();
+  },
 };
 
+export function reloadDb() {
+  if (fs.existsSync(dbPath)) {
+    const buffer = fs.readFileSync(dbPath);
+    sqlDb = new SQL.Database(buffer);
+  }
+}
+
 export default db;
+

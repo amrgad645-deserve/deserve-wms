@@ -1,10 +1,12 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { ClipboardCheck, CheckCircle2, AlertCircle, Save, Filter, Search, Camera, Layers, Package, Shield } from "lucide-react";
+import { ClipboardCheck, CheckCircle2, AlertCircle, Save, Filter, Search, Camera, Layers, Package, Shield, FileSpreadsheet } from "lucide-react";
 import Link from "next/link";
 import CameraScannerModal from "@/components/CameraScannerModal";
 import OperatorSelect from "@/components/OperatorSelect";
+import ExcelImportModal from "@/components/ExcelImportModal";
+
 
 interface Product {
   sku: string;
@@ -22,12 +24,13 @@ export default function AuditPage() {
   const [notes, setNotes] = useState("الجرد الفعلي الافتتاحي للمخزن");
   const [search, setSearch] = useState("");
   const [isCameraOpen, setIsCameraOpen] = useState(false);
+  const [isExcelOpen, setIsExcelOpen] = useState(false);
   const [selectedModel, setSelectedModel] = useState("");
   const [activeTab, setActiveTab] = useState<"ALL" | "SETS" | "SINGLES" | "COVERS">("ALL");
   const [submitting, setSubmitting] = useState(false);
   const [statusMessage, setStatusMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
 
-  useEffect(() => {
+  const loadProducts = () => {
     fetch("/api/products")
       .then((r) => r.json())
       .then((d) => {
@@ -40,7 +43,12 @@ export default function AuditPage() {
           setCounts(initial);
         }
       });
+  };
+
+  useEffect(() => {
+    loadProducts();
   }, []);
+
 
   const handleGoodChange = (sku: string, val: number) => {
     setCounts({
@@ -199,8 +207,18 @@ export default function AuditPage() {
           </div>
         </div>
 
-        {/* Breakdown chips */}
-        <div className="flex items-center gap-2">
+        {/* Breakdown chips & Excel Import */}
+        <div className="flex items-center gap-2 flex-wrap">
+          <button
+            type="button"
+            onClick={() => setIsExcelOpen(true)}
+            className="px-4 py-2.5 bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-black rounded-2xl text-xs transition flex items-center gap-2 shadow-lg shadow-emerald-500/25 border border-emerald-400"
+            title="استيراد وتحديث الأرصدة مباشرة من ملف إكسيل"
+          >
+            <FileSpreadsheet className="w-4 h-4" />
+            <span>📥 رفع شيت الجرد من إكسيل</span>
+          </button>
+
           <div className="bg-purple-500/20 px-3.5 py-2 rounded-xl border border-purple-500/30 text-center">
             <div className="text-[10px] text-purple-300 font-bold">الأطقم الكاملة (SET)</div>
             <div className="text-lg font-black text-purple-200">{totalCountedSets} طقم</div>
@@ -215,6 +233,7 @@ export default function AuditPage() {
           </div>
         </div>
       </div>
+
 
       {statusMessage && (
         <div
@@ -352,6 +371,19 @@ export default function AuditPage() {
           }}
           title="مسح باركود الصنف أثناء الجرد الفعلي"
         />
+
+        <ExcelImportModal
+          isOpen={isExcelOpen}
+          onClose={() => setIsExcelOpen(false)}
+          onImportSuccess={(res) => {
+            setStatusMessage({
+              type: "success",
+              text: `تم بنجاح استيراد وتحديث أرصدة (${res.totalUpdated}) صنف بالمخزن! (إجمالي السليم: ${res.totalGood}، إجمالي التالف: ${res.totalDef})`,
+            });
+            loadProducts();
+          }}
+        />
+
 
         {/* Audit Count Table */}
         <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
