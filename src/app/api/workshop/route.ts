@@ -139,7 +139,7 @@ export async function POST(request: Request) {
     const { dateStr, timeStr } = nowParts();
     const stamp = `${dateStr} ${timeStr}`;
 
-    // ── START: pull from defective stock into internal repair or straight to factory
+    // ── START: pull from defective stock or directly from good stock into internal repair or straight to factory
     if (action === "START_REPAIR") {
       const { sku, defect_reason, spare_parts, factory_name, factory_ref } = body;
       const repairType = body.repair_type === "FACTORY" ? "FACTORY" : "INTERNAL";
@@ -152,39 +152,46 @@ export async function POST(request: Request) {
       const product = db.prepare("SELECT * FROM products WHERE sku = ?").get(sku) as any;
       if (!product) throw new Error(`الصنف ${sku} غير موجود`);
 
-      // If user explicitly asks to deduct from defective stock or if defective stock is sufficient
-      const deductDefective = body.deduct_defective !== false && product.defective_stock >= numQty;
+      // Determine stock deduction:
+      const source = body.source === "GOOD" ? "GOOD" : (product.defective_stock >= numQty ? "DEFECTIVE" : "GOOD");
 
-      let repId = "";
-      db.transaction(() => {
-        if (deductDefective) {
-          db.prepare("UPDATE products SET defective_stock = defective_stock - ?, updated_at = CURRENT_TIMESTAMP WHERE sku = ?").run(numQty, sku);
+      if (source === "GOOD") {
+        if (product.good_stock < numQty) {
+          throw new Error(`رصيد المخزن السليم (${product.good_stock}) لا يكفي لسحب (${numQty}) قطعة`);
         }
-        repId = nextRepairId();
-        db.prepare(`
-          INSERT INTO repairs (repair_id, sku, model, color, size, qty, defect_reason, spare_parts, status, repair_type,
-                               factory_name, factory_ref, sent_to_factory_at, operator, started_at, notes)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        `).run(
-          repId, sku, product.model, product.color, product.size, numQty,
-          defect_reason || "غير محدد",
-          repairType === "INTERNAL" ? spare_parts || "" : "",
-          repairType === "INTERNAL" ? "IN_PROGRESS" : "AT_FACTORY",
-          repairType,
-          repairType === "FACTORY" ? factory_name.trim() : null,
-          repairType === "FACTORY" ? (factory_ref || "").trim() : null,
-          repairType === "FACTORY" ? stamp : null,
-          op, stamp, notes || ""
-        );
-        logMovement(
-          repId, product, numQty,
-          repairType === "INTERNAL" ? "REPAIR_IN" : "FACTORY_SEND",
-          op,
-          repairType === "INTERNAL"
-            ? `تحويل للصيانة الداخلية: ${defect_reason || ""}`
-            : `إرسال للمصنع (${factory_name})${factory_ref ? ` رقم ${factory_ref}` : ""}: ${defect_reason || ""}`
-        );
-      })();
+        db.prepare("UPDATE products SET good_stock = good_stock - ?, updated_at = CURRENT_TIMESTAMP WHERE sku = ?").run(numQty, sku);
+      } else {
+        if (product.defective_stock < numQty) {
+          throw new Error(`رصيد التالف المعزول (${product.defective_stock}) لا يكفي لسحب (${numQty}) قطعة`);
+        }
+        db.prepare("UPDATE products SET defective_stock = defective_stock - ?, updated_at = CURRENT_TIMESTAMP WHERE sku = ?").run(numQty, sku);
+      }
+
+      const repId = nextRepairId();
+      db.prepare(`
+        INSERT INTO repairs (repair_id, sku, model, color, size, qty, defect_reason, spare_parts, status, repair_type,
+                             factory_name, factory_ref, sent_to_factory_at, operator, started_at, notes)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `).run(
+        repId, sku, product.model, product.color, product.size, numQty,
+        defect_reason || "غير محدد",
+        repairType === "INTERNAL" ? spare_parts || "" : "",
+        repairType === "INTERNAL" ? "IN_PROGRESS" : "AT_FACTORY",
+        repairType,
+        repairType === "FACTORY" ? factory_name.trim() : null,
+        repairType === "FACTORY" ? (factory_ref || "").trim() : null,
+        repairType === "FACTORY" ? stamp : null,
+        op, stamp, notes || ""
+      );
+
+      logMovement(
+        repId, product, numQty,
+        repairType === "INTERNAL" ? "REPAIR_IN" : "FACTORY_SEND",
+        op,
+        repairType === "INTERNAL"
+          ? `تحويل للصيانة الداخلية (سحب من ${source === "GOOD" ? "السليم" : "التالف"}): ${defect_reason || ""}`
+          : `إرسال للمصنع (${factory_name})${factory_ref ? ` رقم ${factory_ref}` : ""} (سحب من ${source === "GOOD" ? "السليم" : "التالف"}): ${defect_reason || ""}`
+      );
 
       return NextResponse.json({
         success: true,
@@ -200,12 +207,10 @@ export async function POST(request: Request) {
     // ── Internal repair done → sellable
     if (action === "COMPLETE_REPAIR") {
       if (repair.status !== "IN_PROGRESS") throw new Error("هذا الأمر ليس في الصيانة الداخلية");
-      db.transaction(() => {
-        db.prepare("UPDATE repairs SET status='COMPLETED', outcome='REPAIRED', completed_at=?, notes = COALESCE(notes,'') || ? WHERE repair_id=?")
-          .run(stamp, notes ? ` | ${notes}` : "", repair_id);
-        db.prepare("UPDATE products SET good_stock = good_stock + ?, updated_at = CURRENT_TIMESTAMP WHERE sku = ?").run(repair.qty, repair.sku);
-        logMovement(repair_id, repair, repair.qty, "REPAIR_OUT", op, `تم الإصلاح داخلياً وإعادة للرصيد السليم. قطع غيار: ${repair.spare_parts || "—"}`);
-      })();
+      db.prepare("UPDATE repairs SET status='COMPLETED', outcome='REPAIRED', completed_at=?, notes = COALESCE(notes,'') || ? WHERE repair_id=?")
+        .run(stamp, notes ? ` | ${notes}` : "", repair_id);
+      db.prepare("UPDATE products SET good_stock = good_stock + ?, updated_at = CURRENT_TIMESTAMP WHERE sku = ?").run(repair.qty, repair.sku);
+      logMovement(repair_id, repair, repair.qty, "REPAIR_OUT", op, `تم الإصلاح داخلياً وإعادة للرصيد السليم. قطع غيار: ${repair.spare_parts || "—"}`);
       return NextResponse.json({ success: true, message: "تم الإصلاح وإعادة القطعة لرصيد البيع" });
     }
 
@@ -214,12 +219,10 @@ export async function POST(request: Request) {
       if (repair.status !== "IN_PROGRESS") throw new Error("يمكن التحويل للمصنع من الصيانة الداخلية فقط");
       const factoryName = String(body.factory_name || "").trim();
       if (!factoryName) throw new Error("اسم المصنع مطلوب");
-      db.transaction(() => {
-        db.prepare(`UPDATE repairs SET status='AT_FACTORY', repair_type='FACTORY', factory_name=?, factory_ref=?, sent_to_factory_at=?,
-                    notes = COALESCE(notes,'') || ? WHERE repair_id=?`)
-          .run(factoryName, (body.factory_ref || "").trim(), stamp, " | تعذر الإصلاح داخلياً، تم التحويل للمصنع", repair_id);
-        logMovement(repair_id, repair, repair.qty, "FACTORY_SEND", op, `تحويل من الصيانة الداخلية إلى المصنع (${factoryName})`);
-      })();
+      db.prepare(`UPDATE repairs SET status='AT_FACTORY', repair_type='FACTORY', factory_name=?, factory_ref=?, sent_to_factory_at=?,
+                  notes = COALESCE(notes,'') || ? WHERE repair_id=?`)
+        .run(factoryName, (body.factory_ref || "").trim(), stamp, " | تعذر الإصلاح داخلياً، تم التحويل للمصنع", repair_id);
+      logMovement(repair_id, repair, repair.qty, "FACTORY_SEND", op, `تحويل من الصيانة الداخلية إلى المصنع (${factoryName})`);
       return NextResponse.json({ success: true, message: `تم تحويل ${repair_id} إلى المصنع (${factoryName})` });
     }
 
@@ -241,34 +244,32 @@ export async function POST(request: Request) {
       };
 
       let closedId = repair_id;
-      db.transaction(() => {
-        if (qty < repair.qty) {
-          // Partial: keep remainder open, record the received part as its own closed row
-          db.prepare("UPDATE repairs SET qty = qty - ? WHERE repair_id = ?").run(qty, repair_id);
-          closedId = nextRepairId();
-          db.prepare(`
-            INSERT INTO repairs (repair_id, sku, model, color, size, qty, defect_reason, spare_parts, status, repair_type,
-                                 factory_name, factory_ref, sent_to_factory_at, outcome, operator, started_at, completed_at, notes)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'FACTORY', ?, ?, ?, ?, ?, ?, ?, ?)
-          `).run(
-            closedId, repair.sku, repair.model, repair.color, repair.size, qty, repair.defect_reason, repair.spare_parts,
-            newStatus, repair.factory_name, repair.factory_ref, repair.sent_to_factory_at, outcome, op,
-            repair.started_at, stamp, `استلام جزئي من ${repair_id}${notes ? ` | ${notes}` : ""}`
-          );
-        } else {
-          db.prepare("UPDATE repairs SET status=?, outcome=?, completed_at=?, notes = COALESCE(notes,'') || ? WHERE repair_id=?")
-            .run(newStatus, outcome, stamp, notes ? ` | ${notes}` : "", repair_id);
-        }
+      if (qty < repair.qty) {
+        // Partial: keep remainder open, record the received part as its own closed row
+        db.prepare("UPDATE repairs SET qty = qty - ? WHERE repair_id = ?").run(qty, repair_id);
+        closedId = nextRepairId();
+        db.prepare(`
+          INSERT INTO repairs (repair_id, sku, model, color, size, qty, defect_reason, spare_parts, status, repair_type,
+                               factory_name, factory_ref, sent_to_factory_at, outcome, operator, started_at, completed_at, notes)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'FACTORY', ?, ?, ?, ?, ?, ?, ?, ?)
+        `).run(
+          closedId, repair.sku, repair.model, repair.color, repair.size, qty, repair.defect_reason, repair.spare_parts,
+          newStatus, repair.factory_name, repair.factory_ref, repair.sent_to_factory_at, outcome, op,
+          repair.started_at, stamp, `استلام جزئي من ${repair_id}${notes ? ` | ${notes}` : ""}`
+        );
+      } else {
+        db.prepare("UPDATE repairs SET status=?, outcome=?, completed_at=?, notes = COALESCE(notes,'') || ? WHERE repair_id=?")
+          .run(newStatus, outcome, stamp, notes ? ` | ${notes}` : "", repair_id);
+      }
 
-        if (outcome === "REPAIRED" || outcome === "REPLACED") {
-          db.prepare("UPDATE products SET good_stock = good_stock + ?, updated_at = CURRENT_TIMESTAMP WHERE sku = ?").run(qty, repair.sku);
-        } else if (outcome === "REJECTED") {
-          db.prepare("UPDATE products SET defective_stock = defective_stock + ?, updated_at = CURRENT_TIMESTAMP WHERE sku = ?").run(qty, repair.sku);
-        }
-        // CREDIT: unit stays with factory, no stock change
+      if (outcome === "REPAIRED" || outcome === "REPLACED") {
+        db.prepare("UPDATE products SET good_stock = good_stock + ?, updated_at = CURRENT_TIMESTAMP WHERE sku = ?").run(qty, repair.sku);
+      } else if (outcome === "REJECTED") {
+        db.prepare("UPDATE products SET defective_stock = defective_stock + ?, updated_at = CURRENT_TIMESTAMP WHERE sku = ?").run(qty, repair.sku);
+      }
+      // CREDIT: unit stays with factory, no stock change
 
-        logMovement(closedId, repair, qty, "FACTORY_RETURN", op, `${outcomeLabel[outcome]} (${repair.factory_name})${notes ? ` | ${notes}` : ""}`);
-      })();
+      logMovement(closedId, repair, qty, "FACTORY_RETURN", op, `${outcomeLabel[outcome]} (${repair.factory_name})${notes ? ` | ${notes}` : ""}`);
 
       const msg: Record<string, string> = {
         REPAIRED: `تم استلام ${qty} قطعة متصلحة وإضافتها لرصيد البيع`,

@@ -17,11 +17,13 @@ import {
   Tag, 
   AlertCircle,
   TrendingUp,
-  FileText
+  FileText,
+  Camera
 } from "lucide-react";
 import * as XLSX from "xlsx";
 import { Product, RepairItem } from "@/lib/types";
 import OperatorSelect from "@/components/OperatorSelect";
+import CameraScannerModal from "@/components/CameraScannerModal";
 
 type Tab = "IN_PROGRESS" | "AT_FACTORY" | "COMPLETED" | "CLOSED" | "";
 
@@ -78,6 +80,8 @@ export default function WorkshopPage() {
   const [factoryRef, setFactoryRef] = useState("");
   const [notes, setNotes] = useState("");
   const [deductDefective, setDeductDefective] = useState(true);
+  const [stockSource, setStockSource] = useState<"DEFECTIVE" | "GOOD">("DEFECTIVE");
+  const [isCameraOpen, setIsCameraOpen] = useState(false);
 
   // Escalate / factory-return modals
   const [escalateFor, setEscalateFor] = useState<RepairItem | null>(null);
@@ -85,6 +89,20 @@ export default function WorkshopPage() {
   const [returnQty, setReturnQty] = useState(1);
   const [returnOutcome, setReturnOutcome] = useState<"REPAIRED" | "REPLACED" | "CREDIT" | "REJECTED">("REPAIRED");
   const [busy, setBusy] = useState(false);
+
+  // Check URL query params on mount (e.g. redirected from /defective)
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      const sp = new URLSearchParams(window.location.search);
+      const urlSku = sp.get("sku");
+      const urlReason = sp.get("reason");
+      if (urlSku) {
+        setSelectedSku(urlSku);
+        if (urlReason) setDefectReason(urlReason);
+        setNewOpen(true);
+      }
+    }
+  }, []);
 
   const loadData = async () => {
     try {
@@ -156,6 +174,7 @@ export default function WorkshopPage() {
       spare_parts: spareParts,
       factory_name: factoryName,
       factory_ref: factoryRef,
+      source: stockSource,
       deduct_defective: deductDefective,
       notes,
     });
@@ -704,9 +723,19 @@ export default function WorkshopPage() {
 
               {/* SKU Selection from all 118 catalog products */}
               <div>
-                <label className="block text-xs font-bold text-slate-700 mb-1">
-                  اختر الصنف من كتالوج الـ 118 صنفاً *
-                </label>
+                <div className="flex items-center justify-between mb-1">
+                  <label className="text-xs font-bold text-slate-700">
+                    اختر الصنف من كتالوج الـ 118 صنفاً *
+                  </label>
+                  <button
+                    type="button"
+                    onClick={() => setIsCameraOpen(true)}
+                    className="inline-flex items-center gap-1 text-[11px] font-bold text-violet-700 bg-violet-50 hover:bg-violet-100 border border-violet-200 px-2 py-0.5 rounded-lg transition"
+                  >
+                    <Camera className="w-3.5 h-3.5" />
+                    <span>مسح الباركود بالكاميرا</span>
+                  </button>
+                </div>
                 <select
                   value={selectedSku}
                   onChange={(e) => setSelectedSku(e.target.value)}
@@ -716,11 +745,40 @@ export default function WorkshopPage() {
                     const isSet = p.sku.endsWith("-SET");
                     return (
                       <option key={p.sku} value={p.sku}>
-                        {isSet ? "📦 [طقم] " : "🧳 "} {p.sku} — {p.model} — {p.color} ({p.size}) [تالف المخزن: {p.defective_stock}]
+                        {isSet ? "📦 [طقم] " : "🧳 "} {p.sku} — {p.model} — {p.color} ({p.size}) [تالف: {p.defective_stock} | سليم: {p.good_stock}]
                       </option>
                     );
                   })}
                 </select>
+
+                {/* Stock source selector */}
+                <div className="mt-2 p-2.5 bg-slate-50 border border-slate-200 rounded-xl space-y-1.5 text-xs">
+                  <label className="block font-bold text-slate-700">سحب القطعة من أي رصيد؟</label>
+                  <div className="grid grid-cols-2 gap-2 font-bold text-[11px]">
+                    <button
+                      type="button"
+                      onClick={() => setStockSource("DEFECTIVE")}
+                      className={`p-2 rounded-lg border text-center transition ${
+                        stockSource === "DEFECTIVE"
+                          ? "bg-amber-500 text-slate-950 border-amber-600 font-black shadow-sm"
+                          : "bg-white text-slate-600 border-slate-200 hover:bg-slate-100"
+                      }`}
+                    >
+                      من رصيد التالف المعزول ({products.find((p) => p.sku === selectedSku)?.defective_stock || 0})
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setStockSource("GOOD")}
+                      className={`p-2 rounded-lg border text-center transition ${
+                        stockSource === "GOOD"
+                          ? "bg-emerald-600 text-white border-emerald-700 font-black shadow-sm"
+                          : "bg-white text-slate-600 border-slate-200 hover:bg-slate-100"
+                      }`}
+                    >
+                      سحب مباشر من رف السليم ({products.find((p) => p.sku === selectedSku)?.good_stock || 0})
+                    </button>
+                  </div>
+                </div>
               </div>
 
               {/* Quantity and Defect Reason */}
@@ -973,6 +1031,22 @@ export default function WorkshopPage() {
           </div>
         </div>
       )}
+
+      <CameraScannerModal
+        isOpen={isCameraOpen}
+        onClose={() => setIsCameraOpen(false)}
+        onScan={(scanned) => {
+          const clean = scanned.trim().toUpperCase();
+          const match = products.find((p) => p.sku.toUpperCase() === clean || (p.barcode && p.barcode.toUpperCase() === clean));
+          if (match) {
+            setSelectedSku(match.sku);
+            setIsCameraOpen(false);
+          } else {
+            alert(`لم يتم العثور على صنف بالباركود: ${scanned}`);
+          }
+        }}
+        title="مسح باركود الشنطة لإرسالها للصيانة أو المصنع"
+      />
     </div>
   );
 }

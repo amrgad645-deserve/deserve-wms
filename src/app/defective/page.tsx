@@ -1,14 +1,17 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { AlertTriangle, CheckCircle2, AlertCircle, ShieldAlert } from "lucide-react";
+import { AlertTriangle, CheckCircle2, AlertCircle, ShieldAlert, Camera, Wrench, ArrowLeft } from "lucide-react";
+import Link from "next/link";
 import OperatorSelect from "@/components/OperatorSelect";
+import CameraScannerModal from "@/components/CameraScannerModal";
 
 interface Product {
   sku: string;
   model: string;
   color: string;
   size: string;
+  barcode?: string;
   good_stock: number;
   defective_stock: number;
 }
@@ -22,6 +25,8 @@ export default function DefectivePage() {
   const [notes, setNotes] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [statusMessage, setStatusMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
+  const [lastSentData, setLastSentData] = useState<{ sku: string; reason: string } | null>(null);
+  const [isCameraOpen, setIsCameraOpen] = useState(false);
 
   useEffect(() => {
     fetch("/api/products")
@@ -59,6 +64,7 @@ export default function DefectivePage() {
       const data = await res.json();
       if (data.success) {
         setStatusMessage({ type: "success", text: data.message });
+        setLastSentData({ sku, reason });
         setSku("");
         setQty(1);
         setNotes("");
@@ -101,20 +107,48 @@ export default function DefectivePage() {
 
       {statusMessage && (
         <div
-          className={`p-4 rounded-xl flex items-center gap-3 text-sm font-semibold ${
+          className={`p-4 rounded-xl text-sm font-semibold ${
             statusMessage.type === "success"
               ? "bg-emerald-50 text-emerald-800 border border-emerald-200"
               : "bg-rose-50 text-rose-800 border border-rose-200"
           }`}
         >
-          {statusMessage.type === "success" ? <CheckCircle2 className="w-5 h-5 text-emerald-600" /> : <AlertCircle className="w-5 h-5 text-rose-600" />}
-          <span>{statusMessage.text}</span>
+          <div className="flex items-center gap-3">
+            {statusMessage.type === "success" ? <CheckCircle2 className="w-5 h-5 text-emerald-600 shrink-0" /> : <AlertCircle className="w-5 h-5 text-rose-600 shrink-0" />}
+            <span className="font-bold">{statusMessage.text}</span>
+          </div>
+
+          {statusMessage.type === "success" && lastSentData && (
+            <div className="mt-3 pt-3 border-t border-emerald-200/80 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+              <span className="text-xs text-emerald-950 font-bold">
+                💡 هل تريد فتح أمر صيانة أو إرسال هذه القطعة للمصنع الآن؟
+              </span>
+              <Link
+                href={`/workshop?sku=${encodeURIComponent(lastSentData.sku)}&reason=${encodeURIComponent(lastSentData.reason)}`}
+                className="inline-flex items-center gap-1.5 px-3.5 py-2 bg-emerald-700 hover:bg-emerald-600 text-white rounded-xl text-xs font-black shadow-md transition"
+              >
+                <Wrench className="w-4 h-4" />
+                <span>إرسال للورشة أو المصنع الآن</span>
+                <ArrowLeft className="w-3.5 h-3.5" />
+              </Link>
+            </div>
+          )}
         </div>
       )}
 
       <form onSubmit={handleSubmit} className="bg-white rounded-2xl p-6 border border-slate-200 shadow-sm space-y-6">
         <div>
-          <label className="block text-xs font-bold text-slate-700 mb-1.5">الصنف المعيب *</label>
+          <div className="flex items-center justify-between mb-1.5">
+            <label className="text-xs font-bold text-slate-700">الصنف المعيب *</label>
+            <button
+              type="button"
+              onClick={() => setIsCameraOpen(true)}
+              className="inline-flex items-center gap-1 text-[11px] font-bold text-amber-700 bg-amber-50 hover:bg-amber-100 border border-amber-200 px-2.5 py-1 rounded-lg transition"
+            >
+              <Camera className="w-3.5 h-3.5" />
+              <span>مسح باركود الشنطة بالكاميرا</span>
+            </button>
+          </div>
           <select
             required
             value={sku}
@@ -195,6 +229,22 @@ export default function DefectivePage() {
           <span>{submitting ? "جاري النقل للحجر..." : "عزل ونقل القطع للتالف (TRANSFER TO QUARANTINE)"}</span>
         </button>
       </form>
+
+      <CameraScannerModal
+        isOpen={isCameraOpen}
+        onClose={() => setIsCameraOpen(false)}
+        onScan={(scanned) => {
+          const clean = scanned.trim().toUpperCase();
+          const match = products.find((p) => p.sku.toUpperCase() === clean || (p.barcode && p.barcode.toUpperCase() === clean));
+          if (match) {
+            setSku(match.sku);
+            setIsCameraOpen(false);
+          } else {
+            alert(`لم يتم العثور على صنف بالباركود: ${scanned}`);
+          }
+        }}
+        title="مسح باركود الشنطة المعيبة"
+      />
     </div>
   );
 }
